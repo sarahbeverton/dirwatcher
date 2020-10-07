@@ -21,11 +21,11 @@ logging.basicConfig(
     format='%(asctime)s.%(msecs)03d %(name)-12s \
             %(levelname)-8s [%(threadName)-12s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    filename='dirwatcher.log'
+    stream=sys.stdout,
+    level=logging.DEBUG
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 def scan_single_file(filename, magic_string, dir_path):
@@ -103,7 +103,8 @@ def signal_handler(sig_num, frame):
     """This is a handler for SIGTERM and SIGINT.
     Main() will exit if SIGINT or SIGTERM are trapped."""
     global exit_flag
-    logger.warning('Received signal: ' + signal.Signals(sig_num).name)
+    logger.warning('Received signal: ' + signal.Signals(sig_num).name +
+                   ', Goodbye!')
     if signal.Signals(sig_num).name == 'SIGINT' or 'SIGTERM':
         exit_flag = True
 
@@ -115,7 +116,7 @@ def create_parser():
     parser.add_argument('magic_string', help='text to search for in file')
     parser.add_argument('-e', '--extension', default='.txt',
                         help='file extension to search')
-    parser.add_argument('-i', '--interval', default=2, help='polling interval')
+    parser.add_argument('-i', '--interval', default=1, help='polling interval')
 
     return parser
 
@@ -123,10 +124,6 @@ def create_parser():
 def main(args):
     start_time = time.time()
     parser = create_parser()
-
-    if not args:
-        parser.print_usage()
-        sys.exit(1)
 
     parsed_args = parser.parse_args(args)
 

@@ -3,61 +3,125 @@
 Dirwatcher - A long-running program
 """
 
-__author__ = "Sarah Beverton"
+__author__ = "Sarah Beverton, used logging config from Daniel's example"
 
 import sys
 import signal
 import time
 import argparse
-import re
+import logging
+import os
 
 exit_flag = False
 
+magic_string_lines = {}
+logged_files = []
 
-def search_for_magic(filename, magic_string):
-    with open(filename, 'r') as f:
-        text = f.read()
-        text_list = text.split('\n')
-        pattern = re.compile(rf"{magic_string}")
-        # or maybe re.escape(magic_string) or maybe just re.compile(magic_string)?
-        line_nums = []
-        for i, line in enumerate(text_list, 1):
-            if pattern.search(line):
-                line_nums.append(i)
-    return line_nums
+logging.basicConfig(
+    format='%(asctime)s.%(msecs)03d %(name)-12s \
+            %(levelname)-8s [%(threadName)-12s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    filename='dirwatcher.log'
+)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
-def watch_directory(path, magic_string, extension, interval):
-    # Your code here
-    return
+def scan_single_file(filename, magic_string, dir_path):
+    """Searches given filename for magic string and
+        returns the line number where the magic string was found"""
+    global magic_string_lines
+    global logged_files
+    full_path = f'{dir_path}/{filename}'
+    try:
+        with open(full_path, 'r') as f:
+            text = f.read()
+            text_list = text.split('\n')
+            for i, line in enumerate(text_list, 1):
+                if magic_string in line and i > magic_string_lines[filename]:
+                    logger.info(f'Magic string: \'{magic_string}\' found on line {i} in \
+                                        file: {filename}.')
+                if i > magic_string_lines[filename]:
+                    magic_string_lines[filename] += 1
+    except OSError:
+        logger.info(f'{filename} not found')
+
+
+def detect_added_files(dir_path, extension):
+    """Looks through files in directory and adds them
+        if they are not already in dictionary (and they
+        have the correct extension) - reports added"""
+    global magic_string_lines
+    global logged_files
+
+    abs_path = os.path.abspath(dir_path)
+    dir_files = os.listdir(abs_path)
+    for search_file in dir_files:
+        if search_file not in logged_files and search_file.endswith(extension):
+            logged_files.append(search_file)
+            magic_string_lines[search_file] = 0
+            logger.info(f'New file: {search_file} added to dictionary')
+
+
+def detect_removed_files(dir_path):
+    """Looks through files in dictionary to see if they
+        still exist in the directory - if not, remove them
+        and report as deleted"""
+    global magic_string_lines
+    global logged_files
+
+    abs_path = os.path.abspath(dir_path)
+    dir_files = os.listdir(abs_path)
+    for search_file in logged_files:
+        if search_file not in dir_files:
+            logged_files.remove(search_file)
+            del magic_string_lines[search_file]
+            logger.info(f'File: {search_file} is no longer in directory \
+                        and has been removed from dictionary')
+
+
+def watch_directory(dir_path, magic_string, extension):
+    """Watches given directory for new files or additions to
+        files, and searches the files for a magic string"""
+    global magic_string_lines
+
+    try:
+        abs_path = os.path.abspath(dir_path)
+        dir_files = os.listdir(abs_path)
+    except OSError:
+        logger.info(f'{dir_path} does not exist')
+    else:
+        detect_added_files(dir_path, extension)
+        detect_removed_files(dir_path)
+        for search_file in dir_files:
+            if search_file.endswith(extension):
+                scan_single_file(search_file, magic_string, abs_path)
+
+
+def signal_handler(sig_num, frame):
+    """This is a handler for SIGTERM and SIGINT.
+    Main() will exit if SIGINT or SIGTERM are trapped."""
+    global exit_flag
+    logger.warning('Received signal: ' + signal.Signals(sig_num).name)
+    if signal.Signals(sig_num).name == 'SIGINT' or 'SIGTERM':
+        exit_flag = True
 
 
 def create_parser():
     """Creates an argument parser object."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('filename', help='file to search')
-    # parser.add_argument('start_line', help='?')
+    parser.add_argument('dir_path', help='directory to search')
     parser.add_argument('magic_string', help='text to search for in file')
-    # parser.add_argument('path', help='directory to search')
-    # parser.add_argument('extension', help='what file extension to search')
-    # parser.add_argument('interval', help='polling interval')
+    parser.add_argument('-e', '--extension', default='.txt',
+                        help='file extension to search')
+    parser.add_argument('-i', '--interval', default=2, help='polling interval')
 
     return parser
 
 
-def signal_handler(sig_num, frame):
-    """
-    This is a handler for SIGTERM and SIGINT. Other signals can be mapped here as well (SIGHUP?)
-    Basically, it just sets a global flag, and main() will exit its loop if the signal is trapped.
-    :param sig_num: The integer signal number that was trapped from the OS.
-    :param frame: Not used
-    :return None
-    """
-    # log the associated signal name
-    logger.warn('Received ' + signal.Signals(sig_num).name)
-
-
 def main(args):
+    start_time = time.time()
     parser = create_parser()
 
     if not args:
@@ -66,32 +130,35 @@ def main(args):
 
     parsed_args = parser.parse_args(args)
 
-    file_to_search = parsed_args.filename
     magic_string = parsed_args.magic_string
-    magic_lines = search_for_magic(file_to_search, magic_string)
-    print(f"Magic string found in file {file_to_search} at lines:", magic_lines)
+    polling_interval = parsed_args.interval
+    extension = parsed_args.extension
+    dir_path = parsed_args.dir_path
 
-    # Hook into these two signals from the OS
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    # Now my signal_handler will get called if OS sends
-    # either of these to my process.
-    """
+
+    logger.info(
+        '\n' + '-'*80 +
+        f'\n\tWatching {dir_path} for files with {extension}' +
+        f'\n\tcontaining {magic_string}\n' +
+        '-'*80
+    )
+
     while not exit_flag:
         try:
-            # call my directory watching function
-            pass
+            watch_directory(dir_path, magic_string, extension)
         except Exception as e:
-            # This is an UNHANDLED exception
-            # Log an ERROR level message here
-            pass
+            logger.error(f'Unhandled exception: + {e}')
+        time.sleep(int(polling_interval))
 
-        # put a sleep inside my while loop so I don't peg the cpu usage at 100%
-        time.sleep(polling_interval)
-    """
-    # final exit point happens here
-    # Log a message that we are shutting down
-    # Include the overall uptime since program start
+    uptime = time.time() - start_time
+    logger.info(
+        '\n' + '-'*80 +
+        f'\n\tStopped {__file__}' +
+        f'\n\tUptime was {uptime}\n' +
+        '-'*80
+    )
 
 
 if __name__ == '__main__':

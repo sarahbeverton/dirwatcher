@@ -36,14 +36,13 @@ def scan_single_file(filename, magic_string, dir_path):
     full_path = f'{dir_path}/{filename}'
     try:
         with open(full_path, 'r') as f:
-            text = f.read()
-            text_list = text.split('\n')
+            text_list = f.readlines()
             for i, line in enumerate(text_list, 1):
                 if magic_string in line and i > magic_string_lines[filename]:
                     logger.info(f'Magic string: \'{magic_string}\' found on line {i} in \
                                         file: {filename}.')
                 if i > magic_string_lines[filename]:
-                    magic_string_lines[filename] += 1
+                    magic_string_lines[filename] = i
     except OSError:
         logger.info(f'{filename} not found')
 
@@ -116,7 +115,7 @@ def create_parser():
     parser.add_argument('magic_string', help='text to search for in file')
     parser.add_argument('-e', '--extension', default='.txt',
                         help='file extension to search')
-    parser.add_argument('-i', '--interval', default=1, help='polling interval')
+    parser.add_argument('-i', '--interval', default=2, help='polling interval')
 
     return parser
 
